@@ -14,6 +14,8 @@ class MyWindow(QWidget):
         self.cap = cv2.VideoCapture()
         self.initUI()
         self.slot_init()
+        self.image_processor = ip.ImageProcessor()  # 初始化 image_processor 属性
+        self.fourier_descriptor = ip.FourierDescriptor(self.image_processor)  # 初始化 fourier_descriptor 属性
 
     def initUI(self):
         self.mylabel()
@@ -52,12 +54,14 @@ class MyWindow(QWidget):
         self.label_show_roi.setStyleSheet("QLabel{background:white;}")
         self.label_show_roi.setAutoFillBackground(True)
 
+        self.label_show_contour = QLabel(self)
         self.label_show_ret = QLabel(self)
         self.label_show_ret.setFixedSize(301, 301)
         self.label_show_ret.move(350, 50)
         self.label_show_ret.setStyleSheet("QLabel{background:white;}")
         self.label_show_ret.setAutoFillBackground(True)
 
+        self.label_show_reconstruct = QLabel(self)
         self.label_show_recognition = QLabel('0', self)
         self.label_show_recognition.setStyleSheet("QLabel{background:white; font-size:50px;}")
         self.label_show_recognition.setFixedSize(100, 100)
@@ -98,7 +102,7 @@ class MyWindow(QWidget):
 
     def button_recognition_click(self):
         try:
-            if not hasattr(self, 'fourier_result') or self.fourier_result is None:
+            if self.fourier_result is None:
                 QMessageBox.warning(self, "警告", "请先打开摄像头并采集图像。")
                 return
 
@@ -108,7 +112,7 @@ class MyWindow(QWidget):
             for k in range(1, len(descriptor_in_use)):
                 fd_test[0, k - 1] = int(100 * descriptor_in_use[k] / temp)
 
-            model_path = "C:/Users/WLQVi/Desktop/python/gesture_recognition/GUI/model/svm_efd_train_model.m"
+            model_path = "C:/Users/WLQVi/Desktop/python/gesture_recognition/gui/model/svm_efd_train_model.m"
             prediction = cf.test_efd(fd_test, model_path)  # 获取模型预测结果
 
             print(f"Model prediction: {prediction}")  # 打印模型预测结果
@@ -128,23 +132,48 @@ class MyWindow(QWidget):
 
     def show_camera(self):
         try:
-            width, height = 300, 300  # 设置拍摄窗口大小
-            x0, y0 = 300, 100  # 设置选取位置
+            width, height = 300, 300  # 选取窗口大小
+            x0, y0 = 300, 100  # 选取ROI位置
             flag, frame = self.cap.read()
             if not flag:
                 QMessageBox.warning(self, "警告", "无法读取摄像头图像。")
                 self.timer_camera.stop()
                 return
 
-            roi, res, ret, self.fourier_result, _ = ip.binaryMask(frame, x0, y0, width, height)
-            if roi is None:
-                return
+            # 提取ROI
+            roi = frame[y0:y0 + height, x0:x0 + width]
 
-            roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-            show_roi = QImage(roi.data, roi.shape[1], roi.shape[0], QImage.Format_RGB888)
+            # 预处理（肤色检测+形态学操作）
+            skin_dilated = self.image_processor.preprocess_image(roi)
+
+            # 提取轮廓
+            contour_img = self.image_processor.detect_contours(roi, skin_dilated)
+
+            # 计算傅里叶描述子
+            ret, descriptor = self.fourier_descriptor.calculate(skin_dilated)
+
+            # 如果计算成功，尝试重建
+            if descriptor is not None:
+                reconstructed = self.fourier_descriptor.reconstruct(roi, descriptor)
+                self.fourier_result = descriptor  # 将傅里叶描述子赋值给 self.fourier_result
+            else:
+                reconstructed = np.zeros_like(skin_dilated)  # 为空时用黑色图像填充
+                self.fourier_result = None  # 如果失败，将 self.fourier_result 设置为 None
+
+            # 转换颜色格式以便显示
+            roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+            show_roi = QImage(roi_rgb.data, roi_rgb.shape[1], roi_rgb.shape[0], QImage.Format_RGB888)
             show_ret = QImage(ret.data, ret.shape[1], ret.shape[0], QImage.Format_Grayscale8)
-            self.label_show_roi.setPixmap(QPixmap.fromImage(show_roi))
-            self.label_show_ret.setPixmap(QPixmap.fromImage(show_ret))
+            show_contour = QImage(contour_img.data, contour_img.shape[1], contour_img.shape[0], QImage.Format_RGB888)
+            show_reconstruct = QImage(reconstructed.data, reconstructed.shape[1], reconstructed.shape[0],
+                                      QImage.Format_Grayscale8)
+
+            # 显示图像
+            self.label_show_roi.setPixmap(QPixmap.fromImage(show_roi))  # 原始ROI
+            self.label_show_ret.setPixmap(QPixmap.fromImage(show_ret))  # 轮廓检测结果
+            self.label_show_contour.setPixmap(QPixmap.fromImage(show_contour))  # 轮廓图像
+            self.label_show_reconstruct.setPixmap(QPixmap.fromImage(show_reconstruct))  # 重建图像
+
         except Exception as e:
             QMessageBox.warning(self, "错误", f"显示摄像头图像时出错：{str(e)}")
 

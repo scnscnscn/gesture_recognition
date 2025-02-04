@@ -3,7 +3,7 @@ import cv2
 from gesture_record import image_processor as ip
 import numpy as np
 
-path = 'dataenhance/feature/'
+path = 'feature/'
 path_img = './image/'
 
 if __name__ == "__main__":
@@ -27,11 +27,18 @@ if __name__ == "__main__":
             # 将图像转换为灰度图像
             roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-            # 调用 fourierDescriptor 函数
-            result = ip.fourierDescriptor(roi_gray)
+            # 先创建 image_processor 实例
+            image_processor = ip.ImageProcessor()
+
+            # 创建 FourierDescriptor 实例
+            fd = ip.FourierDescriptor(image_processor)
+
+            # 计算傅里叶描述子
+            result = fd.calculate( roi_gray)
+
             print("fourierDescriptor 返回值:", result)  # 调试输出
 
-            # 提取傅里叶描述子（假设是返回值的第二个元素）
+            # 提取傅里叶描述子
             if isinstance(result, tuple) and len(result) > 1:
                 descriptor_in_use = result[1]  # 傅里叶描述子
             else:
